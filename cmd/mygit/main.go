@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"compress/zlib"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -33,7 +35,7 @@ func main() {
 	case "cat-file":
 		blob_sha := os.Args[3]
 		filePath := fmt.Sprintf("./.git/objects/%s/%s", blob_sha[:2], blob_sha[2:])
-		
+
 		f, err := os.Open(filePath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error opening blob file: %s\n", err)
@@ -43,15 +45,51 @@ func main() {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while reading through zlib: %s\n", err)
 		}
-		
+
 		var out bytes.Buffer
-    	if _, err := io.Copy(&out, r); err != nil {
+		if _, err := io.Copy(&out, r); err != nil {
 			fmt.Fprintf(os.Stderr, "Error while decompressing: %s\n", err)
 		}
 		dString := out.String()
 		res := strings.SplitN(dString, "\x00", 2)[1]
 		fmt.Print(res)
-		
+	case "hash-object":
+		filePath := os.Args[3]
+		byteContent, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading file's content : %s\n", err)
+		}
+		strContent := string(byteContent)
+		blobFileContent := fmt.Sprintf("blob %d\x00%s", len(strContent), strContent)
+		hasher := sha1.New()
+		hasher.Write([]byte(blobFileContent))
+		hashBytes := hasher.Sum(nil)
+		hashString := hex.EncodeToString(hashBytes)
+		fmt.Print(hashString)
+		newDirPath := fmt.Sprintf(".git/objects/%s", hashString[:2])
+		newFilePath := fmt.Sprintf(".git/objects/%s/%s", hashString[:2], hashString[2:])
+		// fmt.Print(newFilePath)
+		var b bytes.Buffer
+		w := zlib.NewWriter(&b)
+		_, err = w.Write([]byte(blobFileContent))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error compressing file content: %s\n", err)
+
+		}
+		err = w.Close() 
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing zlib writer: %s\n", err)
+			 
+		}
+		err = os.MkdirAll(newDirPath, 0755)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error while making new directory: %s\n", err)
+
+		}
+		err = os.WriteFile(newFilePath, b.Bytes(), 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing file's content from me: %s\n", err)
+		}
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
