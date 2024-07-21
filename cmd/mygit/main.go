@@ -76,10 +76,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error compressing file content: %s\n", err)
 
 		}
-		err = w.Close() 
+		err = w.Close()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error closing zlib writer: %s\n", err)
-			 
+
 		}
 		err = os.MkdirAll(newDirPath, 0755)
 		if err != nil {
@@ -90,6 +90,27 @@ func main() {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing file's content from me: %s\n", err)
 		}
+	case "ls-tree":
+		treeHash := os.Args[3]
+		filePath := fmt.Sprintf(".git/objects/%s/%s", treeHash[:2], treeHash[2:])
+		f, _ := os.Open(filePath)
+		r, _ := zlib.NewReader(f)
+		con, _ := io.ReadAll(r)
+		split := bytes.Split(con, []byte("\x00"))
+		use := split[1 : len(split)-1]
+		for _, a := range use {
+			b := bytes.Split(a, []byte(" "))
+			if len(b) > 1 {
+				fmt.Println(string(b[1]))
+			}
+
+		}
+		// for _,arr := range split {
+		// 	x := bytes.Split(arr, []byte(" "))
+		// 	for _,i := range x {
+		// 		println(string(i))
+		// 	}
+		// }
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
