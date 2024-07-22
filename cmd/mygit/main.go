@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -55,41 +56,9 @@ func main() {
 		fmt.Print(res)
 	case "hash-object":
 		filePath := os.Args[3]
-		byteContent, err := os.ReadFile(filePath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading file's content : %s\n", err)
-		}
-		strContent := string(byteContent)
-		blobFileContent := fmt.Sprintf("blob %d\x00%s", len(strContent), strContent)
-		hasher := sha1.New()
-		hasher.Write([]byte(blobFileContent))
-		hashBytes := hasher.Sum(nil)
-		hashString := hex.EncodeToString(hashBytes)
-		fmt.Print(hashString)
-		newDirPath := fmt.Sprintf(".git/objects/%s", hashString[:2])
-		newFilePath := fmt.Sprintf(".git/objects/%s/%s", hashString[:2], hashString[2:])
-		// fmt.Print(newFilePath)
-		var b bytes.Buffer
-		w := zlib.NewWriter(&b)
-		_, err = w.Write([]byte(blobFileContent))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error compressing file content: %s\n", err)
+		hashByte := createBlob(filePath)
+		fmt.Printf("%x", hashByte)
 
-		}
-		err = w.Close()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error closing zlib writer: %s\n", err)
-
-		}
-		err = os.MkdirAll(newDirPath, 0755)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error while making new directory: %s\n", err)
-
-		}
-		err = os.WriteFile(newFilePath, b.Bytes(), 0644)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing file's content from me: %s\n", err)
-		}
 	case "ls-tree":
 		treeHash := os.Args[3]
 		filePath := fmt.Sprintf(".git/objects/%s/%s", treeHash[:2], treeHash[2:])
@@ -105,15 +74,155 @@ func main() {
 			}
 
 		}
-		// for _,arr := range split {
-		// 	x := bytes.Split(arr, []byte(" "))
-		// 	for _,i := range x {
-		// 		println(string(i))
-		// 	}
-		// }
+	case "write-tree":
+		dirPath, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to get working directory %s\n", command)
+		}
+		hashBytes := generateTreesAndBlobs(dirPath)
+		hashString := fmt.Sprintf("%x", hashBytes)
+		fmt.Print(hashString)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
 	}
+}
+
+func generateTreesAndBlobs(dir string) []byte {
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting file stats: %s\n", err)
+	}
+	if dirInfo.Name() == ".git" {
+		return []byte{}
+	}
+
+	entries, err := os.ReadDir(dir)
+	var treeContent []string
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading directory: %s\n", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dirPath := filepath.Join(dir, entry.Name())
+			mode := getGitFileMode(dirPath)
+			subDirHash := generateTreesAndBlobs(entry.Name())
+			if len(subDirHash) > 0 {
+				subDirEntry := fmt.Sprintf("%s %s\x00%s", mode, entry.Name(), subDirHash)
+				treeContent = append(treeContent, subDirEntry)
+			}
+
+		} else {
+			filePath := filepath.Join(dir, entry.Name())
+			hashBytes := createBlob(filePath)
+
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error getting file stats: %s\n", err)
+			}
+			mode := getGitFileMode(filePath)
+			treeEntry := fmt.Sprintf("%s %s\x00%s", mode, entry.Name(), hashBytes)
+			treeContent = append(treeContent, treeEntry)
+		}
+	}
+	sortTreeEntries(treeContent)
+	treeString := strings.Join(treeContent, "")
+	treeHeader := fmt.Sprintf("tree %d\x00", len(treeString))
+	treeFileContent := treeHeader + treeString
+	hashBytes := hashString(treeFileContent)
+	hashHex := fmt.Sprintf("%x", hashBytes)
+	newDirPath := fmt.Sprintf(".git/objects/%s", hashHex[:2])
+	newFilePath := fmt.Sprintf(".git/objects/%s/%s", hashHex[:2], hashHex[2:])
+
+	out := zlibCompress(treeFileContent)
+	err = os.MkdirAll(newDirPath, 0755)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error while making new directory: %s\n", err)
+
+	}
+	err = os.WriteFile(newFilePath, out.Bytes(), 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing file's content from me: %s\n", err)
+	}
+	return hashBytes
+
+}
+
+func createBlob(filePath string) []byte {
+	byteContent, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file's content : %s\n", err)
+	}
+	strContent := string(byteContent)
+	blobFileContent := fmt.Sprintf("blob %d\x00%s", len(strContent), strContent)
+	hashBytes := hashString(blobFileContent)
+	hashhex := fmt.Sprintf("%x", hashBytes)
+	newDirPath := fmt.Sprintf(".git/objects/%s", hashhex[:2])
+	newFilePath := fmt.Sprintf(".git/objects/%s/%s", hashhex[:2], hashhex[2:])
+
+	out := zlibCompress(blobFileContent)
+	err = os.MkdirAll(newDirPath, 0755)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error while making new directory: %s\n", err)
+
+	}
+	err = os.WriteFile(newFilePath, out.Bytes(), 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing file's content from me: %s\n", err)
+	}
+	return hashBytes
+}
+
+func hashString(content string) []byte {
+	hasher := sha1.New()
+	hasher.Write([]byte(content))
+	hashBytes := hasher.Sum(nil)
+	return hashBytes
+}
+
+func zlibCompress(content string) bytes.Buffer {
+	var b bytes.Buffer
+	w := zlib.NewWriter(&b)
+	_, err := w.Write([]byte(content))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error compressing file content: %s\n", err)
+
+	}
+	err = w.Close()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error closing zlib writer: %s\n", err)
+
+	}
+	return b
+}
+
+func getGitFileMode(path string) string {
+	info, err := os.Lstat(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting file,s stat: %s\n", err)
+
+	}
+
+	mode := info.Mode()
+
+	switch {
+	case mode.IsDir():
+		return "40000"
+	case mode&os.ModeSymlink != 0:
+		return "120000"
+	default:
+		if mode&0111 != 0 {
+			return "100755"
+		}
+		return "100644"
+	}
+}
+
+func sortTreeEntries(entries []string) {
+	sort.Slice(entries, func(i, j int) bool {
+		iName := strings.Split(entries[i], " ")[1]
+		jName := strings.Split(entries[i], " ")[1]
+		return iName > jName
+
+	})
 }
