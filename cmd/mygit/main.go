@@ -82,7 +82,7 @@ func main() {
 		hashBytes := generateTreesAndBlobs(dirPath)
 		hashString := fmt.Sprintf("%x", hashBytes)
 		fmt.Print(hashString)
-	case "commit-tree":
+	
 		
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
