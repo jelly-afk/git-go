@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Usage: your_program.sh <command> <arg1> <arg2> ...
@@ -82,8 +83,33 @@ func main() {
 		hashBytes := generateTreesAndBlobs(dirPath)
 		hashString := fmt.Sprintf("%x", hashBytes)
 		fmt.Print(hashString)
-	
+	case "commit-tree":
+		treeSha := os.Args[2]
+		pCommitSha := os.Args[4]
+		commitMsg := os.Args[6]
+		now := time.Now()
+		gitTimestamp := fmt.Sprintf("%d %s", now.Unix(), now.Format("-0700"))
+		commiterString := "John Doe johndoe@example.com" + " " + gitTimestamp
+		commitContent := fmt.Sprintf("tree %s\nparent %s\nauthor %s\ncommitter %s\n\n%s\n", treeSha, pCommitSha, commiterString, commiterString, commitMsg)
 		
+		commitHeader := fmt.Sprintf("commit %d\x00", len(commitContent))
+		commitObjContent := commitHeader + commitContent
+		hashBytes := hashString(commitObjContent)
+		hashHex := fmt.Sprintf("%x", hashBytes)
+		newDirPath := fmt.Sprintf(".git/objects/%s", hashHex[:2])
+		newFilePath := fmt.Sprintf("%s/%s", newDirPath, hashHex[2:])
+
+		out := zlibCompress(commitObjContent)
+		err := os.MkdirAll(newDirPath, 0755)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error while making new directory: %s\n", err)
+
+		}
+		err = os.WriteFile(newFilePath, out.Bytes(), 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing file's content from me: %s\n", err)
+		}
+		fmt.Print(hashHex)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
