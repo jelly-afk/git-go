@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -91,7 +92,7 @@ func main() {
 		gitTimestamp := fmt.Sprintf("%d %s", now.Unix(), now.Format("-0700"))
 		commiterString := "John Doe johndoe@example.com" + " " + gitTimestamp
 		commitContent := fmt.Sprintf("tree %s\nparent %s\nauthor %s\ncommitter %s\n\n%s\n", treeSha, pCommitSha, commiterString, commiterString, commitMsg)
-		
+
 		commitHeader := fmt.Sprintf("commit %d\x00", len(commitContent))
 		commitObjContent := commitHeader + commitContent
 		hashBytes := hashString(commitObjContent)
@@ -110,8 +111,16 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error writing file's content from me: %s\n", err)
 		}
 		fmt.Print(hashHex)
+	case "clone":
+		repo_url := os.Args[2]
+		res, err := http.Get(repo_url)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error while fetching repo: %s\n", err)
+		}
+		println(res)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
+
 		os.Exit(1)
 	}
 }
